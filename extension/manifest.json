@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Open Dialer",
+  "version": "1.0.0",
+  "description": "Open-source power dialer — import CSV leads, auto-dial through your own Twilio account, log outcomes to your own spreadsheet. No third-party infrastructure.",
+  "permissions": [
+    "offscreen",
+    "storage",
+    "sidePanel"
+  ],
+  "host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "https://script.google.com/*",
+    "https://script.googleusercontent.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "action": {
+    "default_title": "Open Dialer",
+    "default_icon": {
+      "16": "icon16.png",
+      "32": "icon32.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icon16.png",
+    "32": "icon32.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}
