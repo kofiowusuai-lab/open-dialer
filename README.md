@@ -2,8 +2,9 @@
 
 Open-source power dialer browser extension for Chrome. Import leads from a CSV,
 auto-dial through your queue using **your own Twilio account**, log outcomes
-back to **your own Google Sheet**. No third-party infrastructure, no telemetry,
-no accounts — your Twilio secrets stay on your machine.
+back to **your own Google Sheet**. No application account or maintainer-hosted service is required. Twilio handles
+voice calls; optional Google Apps Script handles spreadsheet logging. Your Twilio
+API signing secret stays in your local server configuration.
 
 ## How it fits together
 
@@ -18,8 +19,8 @@ no accounts — your Twilio secrets stay on your machine.
 │ Token server (runs locally, zero deps)      │  ← your Twilio API keys
 │ node server.js                              │    live HERE, in .env
 └─────────────────────────────────────────────┘
-        │ POST outcomes
-        ▼
+
+Chrome side panel sends POST outcomes to:
 ┌─────────────────────────────────────────────┐
 │ Your Google Sheet (via Apps Script webhook) │  ← your data, your account
 └─────────────────────────────────────────────┘
@@ -95,8 +96,10 @@ Dispositions: `connected`, `callback`, `not-interested`, `no-answer`, `voicemail
 
 - Twilio API keys live **only** in `server/.env` on your machine — never in the browser, never in any cloud service.
 - Tokens are short-lived (1 hour) and minted on demand.
-- The extension talks to exactly two places: your local token server and (optionally) your own sheet webhook.
-- Nothing is logged, tracked, or sent anywhere else. Audit the code — it's ~600 readable lines.
+- The extension uses the local token server, Twilio Voice services, and optionally the Google Apps Script webhook. Call destination and voice traffic reach Twilio; saved outcomes reach Google when configured.
+- Queue/results use `chrome.storage.local`. Settings use `chrome.storage.sync`, which can sync through the signed-in Chrome profile. The code includes no analytics integration.
+- The token server calls `listen(PORT)` without a loopback-only host, allows wildcard CORS, and has no token-endpoint authentication. Keep it on a trusted machine/network; the current implementation is not hardened for public hosting.
+- The Apps Script sample is deployed with Anyone access and contains no webhook authentication. Treat its URL as sensitive; it is not an access-controlled logging API.
 
 ## Known limitations (by design)
 
@@ -106,4 +109,70 @@ Dispositions: `connected`, `callback`, `not-interested`, `no-answer`, `voicemail
 
 ## License
 
-MIT — do whatever you want, attribution not required. See [LICENSE](LICENSE).
+MIT. Preserve the copyright and permission notice when distributing copies or substantial portions. See [LICENSE](LICENSE).
+
+## Configuration reference
+
+The local server loads `server/.env` itself. Existing process environment values
+win over that file. All five Twilio variables below are required at startup:
+
+| Variable | Purpose |
+| --- | --- |
+| `TWILIO_ACCOUNT_SID` | Twilio account used in voice-token claims |
+| `TWILIO_API_KEY_SID` | Key identifying the token signer |
+| `TWILIO_API_KEY_SECRET` | Secret used to sign access tokens |
+| `TWILIO_CALLER_ID` | Outbound phone number and health-response default |
+| `TWILIO_TWIML_APP_SID` | Application receiving outgoing call requests |
+| `PORT` | Local HTTP port; defaults to 3001 |
+
+The Twilio Function also needs its own `TWILIO_CALLER_ID` configuration as the
+fallback when a call does not supply an override. Creating a local `.env` does
+not configure a hosted Twilio Function.
+
+## Source walkthrough and artifacts
+
+- [`extension/manifest.json`](extension/manifest.json) declares Manifest V3 permissions and the permitted localhost/Google webhook origins.
+- [`extension/background.js`](extension/background.js) opens the side panel and coordinates the offscreen call document.
+- [`extension/offscreen.js`](extension/offscreen.js) fetches a voice token and operates the bundled Twilio SDK/audio connection.
+- [`extension/sidepanel.js`](extension/sidepanel.js) parses CSV leads, normalizes numbers, manages call/disposition state, stores the queue, and exports outcomes.
+- [`server/server.js`](server/server.js) uses Node built-ins to serve `/health` and sign one-hour `/token` responses; no npm install is needed.
+- [`server/twiml-app/function-sample.js`](server/twiml-app/function-sample.js) validates the destination format and returns TwiML for dialing.
+- [`sheets-webhook/apps-script.gs`](sheets-webhook/apps-script.gs) appends outcomes to the active sheet and maintains extra headers.
+
+An import needs a header row and at least one valid lead. A synthetic example:
+
+```csv
+phone,name,company,notes
++12025550123,Example Contact,Example Company,Demo row
+```
+
+CSV exports are named `dialer-results-YYYY-MM-DD.csv`. Browser storage holds the
+queue, results, and cursor; exported files and sheet rows contain lead data.
+Use a consistent set/order of extra CSV columns when logging to one sheet: the
+sample updates headers from each submitted outcome rather than implementing a
+schema migration or deduplicating repeated submissions.
+
+## Local verification and troubleshooting
+
+There is no package manifest, build step, or automated test suite. Syntax checks:
+
+```bash
+node --check server/server.js
+node --check extension/background.js
+node --check extension/offscreen.js
+node --check extension/sidepanel.js
+node --check server/twiml-app/function-sample.js
+```
+
+With the configured server running, visit `http://localhost:3001/health` and use
+**Test connection** in settings. Then load/reload the extension and test CSV
+import, microphone permission, a manually approved call, outcome saving, and CSV
+export. A successful health response only proves the local server is running;
+it does not verify Twilio account permissions or the hosted TwiML handler.
+
+Missing environment errors identify the unset variable. If calls fail, verify the
+TwiML application URL, caller ID, Twilio account restrictions, microphone access,
+and audio devices. A custom remote token URL is not supported by the current
+manifest's host permissions. For sheet failures, verify the deployed `/exec` URL
+and Apps Script authorization; HTTP success alone may still contain `ok: false`
+in the sample webhook's JSON response. Keep local CSV export as the recovery path.
